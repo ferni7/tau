@@ -1676,7 +1676,7 @@ body {
 }
 
 .message.user { align-self: flex-end; }
-.message.assistant { align-self: flex-start; }
+.message.assistant { align-self: flex-start; flex-wrap: wrap; }
 .message-header { display: none; }
 
 .message-usage {
@@ -1685,6 +1685,11 @@ body {
   color: var(--text-dim);
   font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
   margin-top: 2px;
+  opacity: 0.65;
+  flex-basis: 100%;
+}
+
+.message-usage .u-sep {
   opacity: 0.5;
 }
 

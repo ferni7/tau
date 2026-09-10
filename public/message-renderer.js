@@ -108,11 +108,8 @@ export class MessageRenderer {
     }
 
     // Usage/cost info
-    if (message.usage && message.usage.cost) {
-      const cost = message.usage.cost.total;
-      if (cost > 0) {
-        usageHtml = `<span class="message-usage">$${cost.toFixed(4)}</span>`;
-      }
+    if (message.usage || message.durationSec != null) {
+      usageHtml = `<span class="message-usage">${this.usageFooterHtml(message.usage, message.durationSec)}</span>`;
     }
 
     const streamingClass = isStreaming ? ' streaming' : '';
@@ -131,6 +128,35 @@ export class MessageRenderer {
     if (!isHistory) this.scrollToBottom();
 
     return div;
+  }
+
+  formatTokens(n) {
+    if (!n || n <= 0) return null;
+    if (n >= 10000) return Math.round(n / 1000) + 'k';
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+    return String(n);
+  }
+
+  usageFooterHtml(usage, durationSec) {
+    const parts = [];
+    if (durationSec != null && durationSec >= 0) {
+      const s = durationSec < 10 ? durationSec.toFixed(1) : String(Math.round(durationSec));
+      parts.push(`<span class="u-time" title="Time since previous message">⏱ ${s}s</span>`);
+    }
+    if (usage) {
+      const tin = this.formatTokens((usage.input || 0) + (usage.cacheRead || 0));
+      if (tin) parts.push(`<span title="Input tokens (incl. cache reads)">in ${tin}</span>`);
+      const tout = this.formatTokens(usage.output || 0);
+      if (tout) parts.push(`<span title="Output tokens">out ${tout}</span>`);
+      const tthink = this.formatTokens(usage.reasoning || 0);
+      if (tthink) parts.push(`<span title="Thinking tokens">think ${tthink}</span>`);
+      const tcache = this.formatTokens(usage.cacheRead || 0);
+      if (tcache) parts.push(`<span title="Cached input tokens">cache ${tcache}</span>`);
+      if (usage.cost && usage.cost.total > 0) {
+        parts.push(`<span title="Cost">$${usage.cost.total.toFixed(4)}</span>`);
+      }
+    }
+    return parts.join(' <span class="u-sep">·</span> ');
   }
 
   renderThinkingBlock(thinking) {
@@ -188,7 +214,7 @@ export class MessageRenderer {
     }
   }
 
-  finalizeStreamingMessage(messageElement, usage = null, thinking = '') {
+  finalizeStreamingMessage(messageElement, usage = null, thinking = '', durationSec = null) {
     const contentDiv = messageElement.querySelector('.message-content');
     if (contentDiv) {
       contentDiv.classList.remove('streaming');
@@ -217,13 +243,13 @@ export class MessageRenderer {
     }
 
     // Add usage info if available
-    if (usage && usage.cost && usage.cost.total > 0) {
-      if (!messageElement.querySelector('.message-usage')) {
-        const span = document.createElement('span');
-        span.className = 'message-usage';
-        span.textContent = `$${usage.cost.total.toFixed(4)}`;
-        messageElement.appendChild(span);
-      }
+    if ((usage || durationSec != null) && !messageElement.querySelector('.message-usage')) {
+      const span = document.createElement('span');
+      span.className = 'message-usage';
+      span.innerHTML = this.usageFooterHtml(usage, durationSec);
+      const copyBtn = messageElement.querySelector('.message-copy-btn');
+      if (copyBtn) messageElement.insertBefore(span, copyBtn);
+      else messageElement.appendChild(span);
     }
   }
 

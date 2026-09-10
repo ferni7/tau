@@ -295,6 +295,7 @@ function handleAgentStart() {
 function handleAgentEnd() {
   state.setStreaming(false);
   showTypingIndicator(false);
+  stopStreamingTimer();
   currentStreamingElement = null;
   currentStreamingText = '';
   updateUI();
@@ -309,14 +310,43 @@ function handleAgentEnd() {
 
 let currentStreamingThinking = '';
 
+let streamingStartMs = null;
+let streamingTimer = null;
+let liveUsageEl = null;
+
+function startStreamingTimer() {
+  if (streamingTimer) { clearInterval(streamingTimer); streamingTimer = null; }
+  streamingTimer = setInterval(() => {
+    if (!streamingStartMs || !liveUsageEl) return;
+    const elapsed = (Date.now() - streamingStartMs) / 1000;
+    const chars = currentStreamingText.length + currentStreamingThinking.length;
+    const estTok = Math.round(chars / 3.5); // rough: ~3.5 chars per token
+    const rate = elapsed > 0.5 ? Math.round(estTok / elapsed) : 0;
+    liveUsageEl.innerHTML = `⏱ ${elapsed < 10 ? elapsed.toFixed(1) : Math.round(elapsed)}s${rate ? ` <span class="u-sep">·</span> ≈ ${rate} tok/s` : ''}`;
+  }, 200);
+}
+
+function stopStreamingTimer() {
+  if (streamingTimer) { clearInterval(streamingTimer); streamingTimer = null; }
+  if (liveUsageEl) { liveUsageEl.remove(); liveUsageEl = null; }
+}
+
 function handleMessageStart(message) {
   if (message.role === 'assistant') {
     currentStreamingText = '';
     currentStreamingThinking = '';
+    streamingStartMs = Date.now();
     currentStreamingElement = messageRenderer.renderAssistantMessage(
       { content: '' },
       true
     );
+    if (currentStreamingElement) {
+      if (liveUsageEl) liveUsageEl.remove();
+      liveUsageEl = document.createElement('span');
+      liveUsageEl.className = 'message-usage live';
+      currentStreamingElement.appendChild(liveUsageEl);
+      startStreamingTimer();
+    }
   } else if (message.role === 'user') {
     // In mirror mode, user messages from TUI appear via events
     // Only render if we didn't just send this message ourselves
@@ -361,8 +391,11 @@ function handleMessageEnd(message) {
   if (currentStreamingElement) {
     // Pass usage info for cost display
     const usage = message?.usage || null;
+    const durationSec = streamingStartMs ? (Date.now() - streamingStartMs) / 1000 : null;
+    streamingStartMs = null;
+    stopStreamingTimer();
     // Pass thinking content so finalize can render the thinking block
-    messageRenderer.finalizeStreamingMessage(currentStreamingElement, usage, currentStreamingThinking);
+    messageRenderer.finalizeStreamingMessage(currentStreamingElement, usage, currentStreamingThinking, durationSec);
     currentStreamingElement = null;
     currentStreamingThinking = '';
 
@@ -1140,6 +1173,7 @@ async function handleSessionSelect(session, project) {
 async function switchSession(sessionFile, session = null, project = null) {
   try {
     // Clear any streaming state from previous session to prevent bleed
+    stopStreamingTimer();
     currentStreamingElement = null;
     currentStreamingThinking = '';
     currentStreamingText = '';
@@ -1312,12 +1346,20 @@ function updateMirrorInputState() {
 function renderSessionHistory(entries) {
   console.log(`[History] Rendering ${entries.length} entries`);
   let userCount = 0, assistantCount = 0, toolCardCount = 0, toolResultCount = 0;
+  let prevEntryTs = null;
 
   for (const entry of entries) {
     if (entry.type !== 'message') continue;
 
     const msg = entry.message;
     if (!msg) continue;
+
+    // Approximate response duration: gap between this entry and the previous message entry
+    const durationSec =
+      entry.timestamp && prevEntryTs
+        ? Math.max(0, (entry.timestamp - prevEntryTs) / 1000)
+        : null;
+    if (entry.timestamp) prevEntryTs = entry.timestamp;
 
     if (msg.role === 'user') {
       const content =
@@ -1358,6 +1400,7 @@ function renderSessionHistory(entries) {
           {
             content: contentBlocks.length > 0 ? contentBlocks : text,
             usage: msg.usage,
+            durationSec,
           },
           false,
           true
